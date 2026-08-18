@@ -1,5 +1,8 @@
 # Grid Forecasting Operations
 
+> End-to-end electricity demand forecasting, from statistical baselines to
+> production ML.
+
 **GRIFOps** is an end-to-end machine learning project for forecasting
 electricity demand from historical load, weather, and calendar data. It
 explores the progression from simple statistical baselines to classical machine
