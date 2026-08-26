@@ -1,0 +1,23 @@
+[project]
+name = "grifops"
+version = "0.1.0"
+description = "General-purpose Reusable Infrastructure for Forecasting Operations"
+requires-python = ">=3.12,<3.15"
+
+dependencies = [
+    "numpy",
+    "scipy",
+    "pandas",
+    "pyarrow",
+    "matplotlib",
+    "plotly",
+    "yfinance",
+    "scikit-learn",
+    "sktime",
+    "statsmodels",
+    "notebook",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.26,<0.13"]
+build-backend = "uv_build"
