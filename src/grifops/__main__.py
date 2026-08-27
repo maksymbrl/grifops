@@ -12,6 +12,13 @@ from grifops.timeline.model import (
     TimelineBoundaryType,
     TimelineGap,
 )
+from grifops.timeline.repairer import (
+    LinearTimelineRepairStrategy,
+    NextWeekTimelineRepairStrategy,
+    PreviousWeekTimelineRepairStrategy,
+    TimelineRepairer,
+    WeeklyAverageTimelineRepairStrategy,
+)
 
 
 TIMESTAMP_COLUMN = "utc_timestamp"
@@ -23,65 +30,65 @@ DATA_PATH = Path(
 )
 
 
-def reconstruct_timeline(
-    dataset: TimeSeriesDataset,
-    gaps: list[TimelineGap],
-) -> TimeSeriesDataset:
-    """
-    Reconstruct the target timeline using linear interpolation.
-
-    Boundary gaps are removed. Internal gaps are materialized on the
-    expected timeline and filled using time-based interpolation.
-
-    This is a temporary implementation that will later be replaced
-    by TimelineRepairer and TimelineRepairStrategy.
-    """
-
-    offset = pd.tseries.frequencies.to_offset(
-        dataset.frequency
-    )
-
-    start = dataset.data.index[0]
-    end = dataset.data.index[-1]
-
-    # Remove gaps at the boundaries because interpolation requires
-    # valid observations on both sides.
-    for gap in gaps:
-        if gap.boundary is TimelineBoundaryType.START:
-            start = gap.end + offset
-
-        elif gap.boundary is TimelineBoundaryType.END:
-            end = gap.start - offset
-
-    expected_index = pd.date_range(
-        start=start,
-        end=end,
-        freq=dataset.frequency,
-        name=dataset.data.index.name,
-    )
-
-    # Reindexing also creates rows for completely missing timestamps.
-    reconstructed_data = (
-        dataset.data
-        .reindex(expected_index)
-        .copy()
-    )
-
-    reconstructed_data[dataset.target] = (
-        reconstructed_data[dataset.target]
-        .interpolate(
-            method="time",
-            limit_area="inside",
-        )
-    )
-
-    return TimeSeriesDataset(
-        data=reconstructed_data,
-        target=dataset.target,
-        frequency=dataset.frequency,
-        expected_start=expected_index[0],
-        expected_end=expected_index[-1],
-    )
+# def reconstruct_timeline(
+#     dataset: TimeSeriesDataset,
+#     gaps: list[TimelineGap],
+# ) -> TimeSeriesDataset:
+#     """
+#     Reconstruct the target timeline using linear interpolation.
+#
+#     Boundary gaps are removed. Internal gaps are materialized on the
+#     expected timeline and filled using time-based interpolation.
+#
+#     This is a temporary implementation that will later be replaced
+#     by TimelineRepairer and TimelineRepairStrategy.
+#     """
+#
+#     offset = pd.tseries.frequencies.to_offset(
+#         dataset.frequency
+#     )
+#
+#     start = dataset.data.index[0]
+#     end = dataset.data.index[-1]
+#
+#     # Remove gaps at the boundaries because interpolation requires
+#     # valid observations on both sides.
+#     for gap in gaps:
+#         if gap.boundary is TimelineBoundaryType.START:
+#             start = gap.end + offset
+#
+#         elif gap.boundary is TimelineBoundaryType.END:
+#             end = gap.start - offset
+#
+#     expected_index = pd.date_range(
+#         start=start,
+#         end=end,
+#         freq=dataset.frequency,
+#         name=dataset.data.index.name,
+#     )
+#
+#     # Reindexing also creates rows for completely missing timestamps.
+#     reconstructed_data = (
+#         dataset.data
+#         .reindex(expected_index)
+#         .copy()
+#     )
+#
+#     reconstructed_data[dataset.target] = (
+#         reconstructed_data[dataset.target]
+#         .interpolate(
+#             method="time",
+#             limit_area="inside",
+#         )
+#     )
+#
+#     return TimeSeriesDataset(
+#         data=reconstructed_data,
+#         target=dataset.target,
+#         frequency=dataset.frequency,
+#         expected_start=expected_index[0],
+#         expected_end=expected_index[-1],
+#     )
 
 
 def main() -> None:
@@ -153,7 +160,45 @@ def main() -> None:
 
 
 
-    cleaned_dataset = reconstruct_timeline(
+    # cleaned_dataset = reconstruct_timeline(
+    #     dataset=dataset,
+    #     gaps=gaps,
+    # )
+    #
+    # remaining_gaps = inspector.inspect(
+    #     cleaned_dataset
+    # )
+    #
+    # print("\nTimeline reconstruction")
+    # print("-----------------------")
+    # print(
+    #     f"Rows: {len(cleaned_dataset.data)}"
+    # )
+    # print(
+    #     f"Start: {cleaned_dataset.data.index[0]}"
+    # )
+    # print(
+    #     f"End: {cleaned_dataset.data.index[-1]}"
+    # )
+    # print(
+    #     "Missing target values: "
+    #     f"{cleaned_dataset.target_series.isna().sum()}"
+    # )
+    # print(
+    #     f"Remaining gaps: {len(remaining_gaps)}"
+    # )
+    #
+    # Initiating the timeline reconstruction startegy 
+
+    repair_strategy = (
+        PreviousWeekTimelineRepairStrategy()
+    )
+
+    repairer = TimelineRepairer(
+        strategy=repair_strategy,
+    )
+
+    cleaned_dataset = repairer.repair(
         dataset=dataset,
         gaps=gaps,
     )
@@ -164,19 +209,29 @@ def main() -> None:
 
     print("\nTimeline reconstruction")
     print("-----------------------")
+
+    print(
+        f"Repair strategy: "
+        f"{repairer.strategy.name}"
+    )
+
     print(
         f"Rows: {len(cleaned_dataset.data)}"
     )
+
     print(
         f"Start: {cleaned_dataset.data.index[0]}"
     )
+
     print(
         f"End: {cleaned_dataset.data.index[-1]}"
     )
+
     print(
         "Missing target values: "
         f"{cleaned_dataset.target_series.isna().sum()}"
     )
+
     print(
         f"Remaining gaps: {len(remaining_gaps)}"
     )
