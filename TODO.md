@@ -1,0 +1,5 @@
+ - [x] Write end-to-end procedural pipeline for analysing test electricity dataset 
+ - [ ] Refactor the code into its SOLID variant 
+    - [ ] `evaluate_repair_methods()`
+    - [ ] `repair_missing_values()`
+ - [ ] Introduce local AI orchestrator to extend the software for more forecasting tasks 

@@ -22,17 +22,6 @@ from sklearn.metrics import (
 
 
 
-@dataclass
-class TimeSeriesDataset:
-    data: pd.DataFrame 
-    frequency: str
-    target: str
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.data.index, pd.DatetimeIndex):
-            raise TypeError(
-                "TimeSeriesDataset requires a DatetimeIndex"
-            )
 
 
 def load_data(
