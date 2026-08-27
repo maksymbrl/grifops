@@ -6,7 +6,7 @@ from typing import Any, Generic, TypeVar
 
 import pandas as pd
 
-from grifops.data_adapter import TimeSeriesDataAdapter
+from grifops.dataset.adapter import TimeSeriesDataAdapter
 from grifops.dataset import TimeSeriesDataset
 
 

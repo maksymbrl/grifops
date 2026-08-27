@@ -5,10 +5,10 @@ from pathlib import Path
 import pandas as pd
 
 from grifops.dataset import TimeSeriesDataset
-from grifops.data_adapter import PandasDataFrameAdapter
-from grifops.data_loader import CsvTimeSeriesLoader
-from grifops.timeline_inspector import TimelineInspector
-from grifops.timeline_repairer import (
+from grifops.dataset.adapter import PandasDataFrameAdapter
+from grifops.dataset.loader import CsvTimeSeriesLoader
+from grifops.timeline.inspector import TimelineInspector
+from grifops.timeline.model import (
     TimelineBoundaryType,
     TimelineGap,
 )

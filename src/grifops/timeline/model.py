@@ -173,3 +173,4 @@ class TimelineGap:
                 for segment in self.segments
             }
         ) > 1
+

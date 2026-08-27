@@ -3,7 +3,7 @@ from __future__ import annotations
 import pandas as pd
 
 from grifops.dataset import TimeSeriesDataset
-from grifops.timeline_repairer import (
+from grifops.timeline.model import (
     TimelineBoundaryType,
     TimelineDefectType,
     TimelineGap,
