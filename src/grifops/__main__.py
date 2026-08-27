@@ -29,6 +29,7 @@ from grifops.timeline.repairer import (
     LinearTimelineRepairStrategy,
     NextWeekTimelineRepairStrategy,
     PreviousWeekTimelineRepairStrategy,
+    TimelineRepairer,
     WeeklyAverageTimelineRepairStrategy,
 )
 from grifops.timeline.validation import (
@@ -47,6 +48,10 @@ DATA_PATH = Path(
 
 def main() -> None:
     print("GRIFOps")
+
+    #
+    # Load dataset
+    #
 
     adapter = PandasDataFrameAdapter(
         timestamp_column=TIMESTAMP_COLUMN,
@@ -73,6 +78,10 @@ def main() -> None:
         "Missing target values: "
         f"{dataset.target_series.isna().sum()}"
     )
+
+    #
+    # Inspect timeline
+    #
 
     inspector = TimelineInspector()
 
@@ -113,12 +122,19 @@ def main() -> None:
                 f"[{segment.defect_type.value}]"
             )
 
-    repair_strategies = (
-        LinearTimelineRepairStrategy(),
-        PreviousWeekTimelineRepairStrategy(),
-        NextWeekTimelineRepairStrategy(),
-        WeeklyAverageTimelineRepairStrategy(),
-    )
+    #
+    # Configure available repair methods
+    #
+
+    repair_strategies = {
+        strategy.name: strategy
+        for strategy in (
+            LinearTimelineRepairStrategy(),
+            PreviousWeekTimelineRepairStrategy(),
+            NextWeekTimelineRepairStrategy(),
+            WeeklyAverageTimelineRepairStrategy(),
+        )
+    }
 
     metrics = {
         "mae": MeanAbsoluteError(),
@@ -132,9 +148,13 @@ def main() -> None:
     )
 
     evaluator = TimelineRepairMethodEvaluator(
-        strategies=repair_strategies,
+        strategies=repair_strategies.values(),
         metrics=metrics,
     )
+
+    #
+    # Evaluate repair methods
+    #
 
     evaluation_results = []
 
@@ -183,8 +203,11 @@ def main() -> None:
             "\nNo valid repair method "
             "evaluations were produced."
         )
-
         return
+
+    #
+    # Summarize evaluation results
+    #
 
     results_df = pd.DataFrame(
         asdict(result)
@@ -215,48 +238,245 @@ def main() -> None:
     print("------------------")
     print(summary)
 
-    print("\nBest method by MAE")
-    print("------------------")
+    #
+    # Calculate mean MAE and RMSE
+    #
 
-    mae_results = (
-        results_df[
-            results_df["metric"] == "mae"
-        ]
+    mean_scores = (
+        results_df
         .groupby(
             [
                 "gap_start",
                 "gap_end",
                 "method",
+                "metric",
             ],
             as_index=False,
         )["score"]
         .mean()
     )
 
+    #
+    # Build lookup for real internal gaps
+    #
+
+    internal_gaps = {
+        (
+            gap.start,
+            gap.end,
+        ): gap
+        for gap in gaps
+        if (
+            gap.boundary
+            is TimelineBoundaryType.NONE
+        )
+    }
+
+    #
+    # Select repair strategy for each internal gap
+    #
+
+    selected_strategies = {}
+
+    print("\nBest repair methods")
+    print("-------------------")
+
     for (
         gap_start,
         gap_end,
-    ), group in mae_results.groupby(
+    ), gap_scores in mean_scores.groupby(
         [
             "gap_start",
             "gap_end",
         ]
     ):
-        best = group.loc[
-            group["score"].idxmin()
+        print(
+            f"\n{gap_start} -> {gap_end}"
+        )
+
+        mae_scores = gap_scores[
+            gap_scores["metric"] == "mae"
+        ]
+
+        rmse_scores = gap_scores[
+            gap_scores["metric"] == "rmse"
+        ]
+
+        if (
+            mae_scores.empty
+            or rmse_scores.empty
+        ):
+            print(
+                "  Cannot select method: "
+                "MAE or RMSE results are missing."
+            )
+            continue
+
+        minimum_mae = mae_scores[
+            "score"
+        ].min()
+
+        minimum_rmse = rmse_scores[
+            "score"
+        ].min()
+
+        best_mae_methods = set(
+            mae_scores.loc[
+                mae_scores["score"] == minimum_mae,
+                "method",
+            ]
+        )
+
+        best_rmse_methods = set(
+            rmse_scores.loc[
+                rmse_scores["score"] == minimum_rmse,
+                "method",
+            ]
+        )
+
+        #
+        # A method wins only if both MAE and RMSE
+        # identify it as a best-performing method.
+        #
+
+        best_methods = (
+            best_mae_methods
+            & best_rmse_methods
+        )
+
+        if not best_methods:
+            print(
+                "  No unambiguous best method."
+            )
+
+            print(
+                "  Lowest MAE: "
+                f"{', '.join(sorted(best_mae_methods))} "
+                f"({minimum_mae:.2f})"
+            )
+
+            print(
+                "  Lowest RMSE: "
+                f"{', '.join(sorted(best_rmse_methods))} "
+                f"({minimum_rmse:.2f})"
+            )
+
+            continue
+
+        if len(best_methods) > 1:
+            print(
+                "  Multiple methods share the lowest "
+                "MAE and RMSE:"
+            )
+
+            for method in sorted(
+                best_methods
+            ):
+                print(
+                    f"    {method}"
+                )
+
+            continue
+
+        best_method = next(
+            iter(best_methods)
+        )
+
+        gap = internal_gaps[
+            (
+                gap_start,
+                gap_end,
+            )
+        ]
+
+        selected_strategies[
+            gap
+        ] = repair_strategies[
+            best_method
         ]
 
         print(
-            f"{gap_start} -> {gap_end}"
+            f"  Method: {best_method}"
         )
 
         print(
-            f"  Method: {best['method']}"
+            f"  Mean MAE: {minimum_mae:.2f}"
         )
 
         print(
-            f"  Mean MAE: {best['score']:.2f}"
+            f"  Mean RMSE: {minimum_rmse:.2f}"
         )
+
+    #
+    # Require a strategy for every internal gap
+    #
+
+    if (
+        len(selected_strategies)
+        != len(internal_gaps)
+    ):
+        print(
+            "\nTimeline repair aborted: "
+            "not every internal gap has an "
+            "unambiguous repair method."
+        )
+
+        return
+
+    #
+    # Repair timeline
+    #
+
+    print("\nApplied repair methods")
+    print("----------------------")
+
+    for gap, strategy in (
+        selected_strategies.items()
+    ):
+        print(
+            f"{gap.start} -> {gap.end}: "
+            f"{strategy.name}"
+        )
+
+    repairer = TimelineRepairer()
+
+    cleaned_dataset = repairer.repair(
+        dataset=dataset,
+        gaps=gaps,
+        strategies=selected_strategies,
+    )
+
+    #
+    # Validate repaired dataset
+    #
+
+    remaining_gaps = inspector.inspect(
+        cleaned_dataset
+    )
+
+    print("\nTimeline repair")
+    print("---------------")
+
+    print(
+        f"Rows: {len(cleaned_dataset.data)}"
+    )
+
+    print(
+        f"Start: {cleaned_dataset.data.index[0]}"
+    )
+
+    print(
+        f"End: {cleaned_dataset.data.index[-1]}"
+    )
+
+    print(
+        "Missing target values: "
+        f"{cleaned_dataset.target_series.isna().sum()}"
+    )
+
+    print(
+        f"Remaining gaps: {len(remaining_gaps)}"
+    )
 
 
 if __name__ == "__main__":

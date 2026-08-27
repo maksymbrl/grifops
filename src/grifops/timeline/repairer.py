@@ -1,7 +1,7 @@
 # src/grifops/timeline/repairer.py
 
 from abc import ABC, abstractmethod
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 
 import pandas as pd
 
@@ -54,7 +54,9 @@ class TimelineRepairStrategy(ABC):
             gap
         )
 
-        if not required.isin(series.index).all():
+        if not required.isin(
+            series.index
+        ).all():
             return False
 
         return not series.loc[
@@ -90,7 +92,6 @@ class LinearTimelineRepairStrategy(
         self,
         gap: TimelineGap,
     ) -> pd.DatetimeIndex:
-
         offset = pd.tseries.frequencies.to_offset(
             gap.frequency
         )
@@ -107,10 +108,9 @@ class LinearTimelineRepairStrategy(
         series: pd.Series,
         gap: TimelineGap,
     ) -> pd.Series:
-
         if not self.can_repair(
-            series,
-            gap,
+            series=series,
+            gap=gap,
         ):
             raise ValueError(
                 "Linear repair requires valid observations "
@@ -125,7 +125,9 @@ class LinearTimelineRepairStrategy(
             pd.DatetimeIndex(
                 [context[0]]
             )
-            .append(gap.index)
+            .append(
+                gap.index
+            )
             .append(
                 pd.DatetimeIndex(
                     [context[1]]
@@ -154,7 +156,6 @@ class LinearTimelineRepairStrategy(
         return result
 
 
-
 class PreviousWeekTimelineRepairStrategy(
     TimelineRepairStrategy
 ):
@@ -181,10 +182,9 @@ class PreviousWeekTimelineRepairStrategy(
         series: pd.Series,
         gap: TimelineGap,
     ) -> pd.Series:
-
         if not self.can_repair(
-            series,
-            gap,
+            series=series,
+            gap=gap,
         ):
             raise ValueError(
                 "Previous-week repair requires valid observations "
@@ -224,7 +224,6 @@ class NextWeekTimelineRepairStrategy(
         self,
         gap: TimelineGap,
     ) -> pd.DatetimeIndex:
-
         return (
             gap.index
             + pd.Timedelta(days=7)
@@ -235,10 +234,9 @@ class NextWeekTimelineRepairStrategy(
         series: pd.Series,
         gap: TimelineGap,
     ) -> pd.Series:
-
         if not self.can_repair(
-            series,
-            gap,
+            series=series,
+            gap=gap,
         ):
             raise ValueError(
                 "Next-week repair requires valid observations "
@@ -260,7 +258,6 @@ class NextWeekTimelineRepairStrategy(
             index=gap.index,
             name=series.name,
         )
-
 
 
 class WeeklyAverageTimelineRepairStrategy(
@@ -299,8 +296,8 @@ class WeeklyAverageTimelineRepairStrategy(
         gap: TimelineGap,
     ) -> pd.Series:
         if not self.can_repair(
-            series,
-            gap,
+            series=series,
+            gap=gap,
         ):
             raise ValueError(
                 "Weekly-average repair requires valid observations "
@@ -343,49 +340,48 @@ class WeeklyAverageTimelineRepairStrategy(
 
 class TimelineRepairer:
     """
-    Repairs timeline gaps using a supplied TimelineRepairStrategy.
+    Repairs timeline gaps using preselected repair strategies.
 
-    Boundary gaps are removed because the current reconstruction
-    policy only repairs gaps bounded by valid observations.
+    The caller determines which strategy should be used for each
+    internal gap. Boundary gaps are removed because the current
+    reconstruction policy only repairs gaps bounded by valid
+    observations.
     """
-
-    def __init__(
-        self,
-        strategy: TimelineRepairStrategy,
-    ) -> None:
-        self._strategy = strategy
-
-    @property
-    def strategy(self) -> TimelineRepairStrategy:
-        """
-        Return the currently configured repair strategy.
-        """
-
-        return self._strategy
 
     def repair(
         self,
         dataset: TimeSeriesDataset,
         gaps: Iterable[TimelineGap],
+        strategies: Mapping[
+            TimelineGap,
+            TimelineRepairStrategy,
+        ],
     ) -> TimeSeriesDataset:
         """
         Return a new TimeSeriesDataset with timeline gaps repaired.
 
-        Start/end boundary gaps are removed. Missing internal
-        timestamps are materialized and internal gaps are repaired
-        using the configured strategy.
+        Start and end boundary gaps are removed. Missing timestamps
+        are materialized, and every internal gap is repaired using
+        its preselected repair strategy.
         """
 
-        gaps = tuple(gaps)
+        gaps = tuple(
+            gaps
+        )
 
         self._validate_gaps(
-            dataset,
-            gaps,
+            dataset=dataset,
+            gaps=gaps,
+        )
+
+        self._validate_strategies(
+            gaps=gaps,
+            strategies=strategies,
         )
 
         start, end = self._repair_boundaries(
-            dataset,
-            gaps,
+            dataset=dataset,
+            gaps=gaps,
         )
 
         reconstructed_data = self._materialize_timeline(
@@ -401,13 +397,15 @@ class TimelineRepairer:
             ):
                 continue
 
-            repaired_values = (
-                self._strategy.repair(
-                    series=reconstructed_data[
-                        dataset.target
-                    ],
-                    gap=gap,
-                )
+            strategy = strategies[
+                gap
+            ]
+
+            repaired_values = strategy.repair(
+                series=reconstructed_data[
+                    dataset.target
+                ],
+                gap=gap,
             )
 
             reconstructed_data.loc[
@@ -437,7 +435,7 @@ class TimelineRepairer:
         gaps: tuple[TimelineGap, ...],
     ) -> None:
         """
-        Ensure all gaps belong to the dataset timeline.
+        Ensure all gaps are compatible with the dataset timeline.
         """
 
         for gap in gaps:
@@ -446,6 +444,42 @@ class TimelineRepairer:
                     "TimelineGap frequency does not match "
                     "the dataset frequency."
                 )
+
+    def _validate_strategies(
+        self,
+        gaps: tuple[TimelineGap, ...],
+        strategies: Mapping[
+            TimelineGap,
+            TimelineRepairStrategy,
+        ],
+    ) -> None:
+        """
+        Ensure every internal gap has a selected repair strategy.
+        """
+
+        internal_gaps = {
+            gap
+            for gap in gaps
+            if (
+                gap.boundary
+                is TimelineBoundaryType.NONE
+            )
+        }
+
+        supplied_gaps = set(
+            strategies
+        )
+
+        missing_gaps = (
+            internal_gaps
+            - supplied_gaps
+        )
+
+        if missing_gaps:
+            raise ValueError(
+                "No repair strategy was supplied for "
+                f"{len(missing_gaps)} internal timeline gap(s)."
+            )
 
     def _repair_boundaries(
         self,
